@@ -1,0 +1,13 @@
+*.pyc
+*.pyo
+*.bak
+*~
+*#
+*.o
+.Trashes
+Thumbs.db
+ehthumbs.db
+.SpotLight-V100
+.DS_Store
+.DS_Store?
+*.log

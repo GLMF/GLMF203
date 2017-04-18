@@ -1,0 +1,98 @@
+#!/bin/bash
+
+readonly DIR_LIST='bin/data/backupSys/backup.list'
+readonly EXCLUDE_LIST='bin/data/backupSys/backup_exclude.list'
+readonly HDD=('/media/disk1' '/media/disk2')
+readonly ERROR_LOG='bin/data/backupSys/error.log'
+readonly ERROR_SAVE='bin/data/backupSys/error.log.bak'
+readonly ALARM_SOUND='bin/data/backupSys/alarm.wav'
+readonly MAIL='mon_mail@gmail.com'
+
+usage() {
+    if [ "${1}" == "help" ]; then
+        local hdd_number=0
+        echo 'Usage: backupSys <action> [hdd_number] [init]'
+        echo '       <action> :'
+        echo '           - save   : Sauvegarde les répertoires DIR_LIST dans HDD[hdd_number]'
+        echo '           - notify : pour envoyer les fichiers'
+        echo '           - state  : état de la sauvegarde (contenu de error.log)'
+        echo '           - mail   : envoi d un rapport par mail'
+        echo '       [hdd_number] : numéro du disque à utiliser'
+        echo '       [init]       : si spécifié, initialisation du fichier error.log'
+        for hdd in ${HDD[@]}; do
+            echo "           - ${hdd_number} : ${hdd}"
+            hdd_number=$((${hdd_number}+1))
+        done
+        exit 0
+    fi
+}
+
+# Sauvegarde des répertoires de DIR_LIST sur le disque passé en paramètre
+# ${1} : numéro du disque à utiliser dans HDD
+# ${2} : initialisation du fichier error.log (optionnel)
+save() {
+    if [ -z ${1} ] || [ -z ${HDD[${1}]} ]; then
+        echo "Disque dur ${1} inexistant"
+        exit 1
+    fi
+    if [ ! -e ${HDD[${1}]} ]; then
+        echo "Disque du ${HDD[${1}]} absent"
+        echo "Disque du ${HDD[${1}]} absent" >> ${ERROR_LOG}
+        exit 2
+    fi
+    if [ ! -z ${2} ]; then
+        mv ${ERROR_LOG} ${ERROR_SAVE}
+    fi
+    # Exclusion des fichiers de EXCLUDE_LIST
+    local exclude=""
+    while read -r directory || [[ -n "${directory}" ]]; do
+        exclude="--exclude ${directory} ${exclude}"
+    done < ${EXCLUDE_LIST}
+    # Lancement des sauvegardes
+    while read -r directory || [[ -n "${directory}" ]]; do
+        notify-send -t 1500 "backupSys" "Lancement de la sauvegarde sur :\n${HDD[${1}]}"
+        rsync -aH --delete --force --stats ${exclude} ${directory} ${HDD[${1}]} 2>> ${ERROR_LOG} | logger -p local0.notice
+        notify-send -i /usr/share/icons/mate/32x32/emblems/emblem-default.png -t 1500 "backupSys" "Sauvegarde terminée sur :\n${HDD[${1}]}"
+    done < ${DIR_LIST}
+}
+
+# Notification d'erreur lors de la sauvegarde
+notify() {
+    if [ -s ${ERROR_LOG} ]; then
+        notify-send -i /usr/share/icons/mate/32x32/status/dialog-warning.png -u CRITICAL -t 15000 "backupSys" "Erreur de sauvegarde\nConsultez les fichiers :\n- error.log\n- /var/log/backup.log"
+        amixer -D pulse sset Master 100%
+        aplay ${ALARM_SOUND}
+    else
+        notify-send -i /usr/share/icons/mate/32x32/emblems/emblem-default.png -t 1500 "backupSys" "Sauvegarde OK"
+    fi
+}
+
+# État de la sauvegarde
+state() {
+    more ${ERROR_LOG}
+}
+
+# Vérification des sauvegardes et rapport par mail
+mail() {
+    local content=""
+    for hdd in ${HDD[@]}; do
+        content=${content}"Sauvegarde sur ${hdd}\n"
+        content=${content}$(find ${hdd} -mtime -1)
+        content=${content}"\n\n"
+    done
+    printf "To:${MAIL}\nSubject:Rapport de sauvegarde du $(date)\n\n${content}" > /tmp/mail.txt
+    msmtp -t < /tmp/mail.txt
+    rm /tmp/mail.txt
+}
+
+if [ "${1}" == 'save' ]; then
+    save ${2}
+elif [ "${1}" == 'notify' ]; then
+    notify
+elif [ "${1}" == 'state' ]; then
+    state
+elif [ "${1}" == 'mail' ]; then
+    mail
+else
+    usage 'help'
+fi
